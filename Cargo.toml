@@ -5,6 +5,8 @@ authors = ["Rob Saunders <hello@robsaunders.io>"]
 
 [dependencies]
 vst2 = { git = "https://github.com/overdrivenpotato/rust-vst2" }
+sdl2 = "0.30.0"
+libc = "*"
 
 [lib]
 name = "sine_synth"

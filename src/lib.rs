@@ -1,11 +1,15 @@
 #[macro_use] extern crate vst2;
+//extern crate libc;
 
 use vst2::buffer::AudioBuffer;
 use vst2::plugin::{Category, Plugin, Info, CanDo};
+use vst2::editor::Editor;
 use vst2::event::Event;
 use vst2::api::Supported;
 
 use std::f64::consts::PI;
+
+use std::os::raw::c_void;
 
 /// Convert the midi note into the equivalent frequency.
 ///
@@ -17,12 +21,18 @@ fn midi_note_to_hz(note: u8) -> f64 {
 }
 
 struct SineSynth {
+    // Parameters
+    attack: f32,
+    release: f32,
+
     sample_rate: f64,
     time: f64,
     note_duration: f64,
     note: Option<u8>,
-    last_note: Option<u8>,
+    is_pressed: bool,  // true if current pressed
     last_released: f64,  // time since the note was last released
+
+    editor: SineSynthEditor,
 }
 
 impl SineSynth {
@@ -49,15 +59,23 @@ impl SineSynth {
     }
 
     fn note_on(&mut self, note: u8) {
-        self.note_duration = 0.0;
-        self.note = Some(note)
+        if self.note == None || !self.is_pressed{
+            // if no note is already pressed
+            // basically enforcing monophonic control
+            self.note_duration = 0.0;
+            self.note = Some(note);
+            self.is_pressed = true;
+        }
     }
 
     fn note_off(&mut self, note: u8) {
-        if self.note == Some(note) {
-            self.note = None;
-            self.last_note = Some(note);
-            self.last_released = 0.0;
+        if let Some(current_note) = self.note {
+            if current_note == note {
+                // only consider note-off events
+                // for the current note
+                self.last_released = 0.0;
+                self.is_pressed = false;
+            }
         }
     }
 }
@@ -67,12 +85,17 @@ pub const TAU : f64 = PI * 2.0;
 impl Default for SineSynth {
     fn default() -> SineSynth {
         SineSynth {
+            attack: 0.2,
+            release: 0.2,
+
             sample_rate: 44100.0,
             note_duration: 0.0,
             time: 0.0,
             note: None,
-            last_note: None,
+            is_pressed: false,
             last_released: 0.0,
+
+            editor: Default::default()
         }
     }
 }
@@ -86,9 +109,49 @@ impl Plugin for SineSynth {
             category: Category::Synth,
             inputs: 2,
             outputs: 2,
-            parameters: 0,
+            parameters: 2,
             initial_delay: 0,
             ..Info::default()
+        }
+    }
+
+    fn get_parameter(&self, index: i32) -> f32 {
+        match index {
+            0 => self.attack,
+            1 => self.release,
+            _ => 0.0,
+        }
+    }
+
+    fn set_parameter(&mut self, index: i32, value: f32) {
+        match index {
+            0 => self.attack = value.max(1.0),
+            1 => self.release = value.max(1.0),
+            _ => (),
+        }
+    }
+
+    fn get_parameter_name(&self, index: i32) -> String {
+        match index {
+            0 => "Attack".to_string(),
+            1 => "Release".to_string(),
+            _ => "".to_string(),
+        }
+    }
+
+    fn get_parameter_text(&self, index: i32) -> String {
+        match index {
+            0 => format!("{}", self.attack),
+            1 => format!("{}", self.release),
+            _ => "".to_string(),
+        }
+    }
+
+    fn get_parameter_label(&self, index: i32) -> String {
+        match index {
+            0 => "s".to_string(),
+            1 => "s".to_string(),
+            _ => "".to_string(),
         }
     }
 
@@ -121,40 +184,33 @@ impl Plugin for SineSynth {
             let mut t = self.time;
 
             for (_, output_sample) in input_buffer.iter().zip(output_buffer) {
-                if let Some(current_note) = self.note {
-                    // note is pressed
+                if let Some(note) = self.note {
+                    let signal = (t * midi_note_to_hz(note) * TAU).sin();
 
-                    let signal = (t * midi_note_to_hz(current_note) * TAU).sin();
-
-                    // Apply a quick envelope to the attack of the signal to avoid popping.
                     let attack = 0.5;
+                    let release = 0.2;
+
+                    // Apply attack
                     let alpha = if self.note_duration < attack {
                         self.note_duration / attack
                     } else {
                         1.0
                     };
 
-                    *output_sample = (signal * alpha) as f32;
+                    // Apply release
+                    let beta = if self.is_pressed {
+                        1.0
+                    } else if self.last_released < release {
+                        1.0 - (self.last_released / release)
+                    } else {
+                        0.0
+                    };
+
+                    *output_sample = (signal * alpha * beta) as f32;
 
                     t += per_sample;
                 } else {
-                    // if a note was pressed earlier
-                    if let Some(last_note) = self.last_note {
-                        let signal = (t * midi_note_to_hz(last_note) * TAU).sin();
-
-                        let release = 0.1;
-                        let beta = if self.last_released < release {
-                            1.0 - (self.last_released / release)
-                        } else {
-                            0.0
-                        };
-
-                        *output_sample = (signal * beta) as f32;
-
-                        t += per_sample;
-                    } else {
-                        *output_sample = 0.0;
-                    }
+                    *output_sample = 0.0;
                 }
             }
         }
@@ -169,6 +225,41 @@ impl Plugin for SineSynth {
             CanDo::ReceiveMidiEvent => Supported::Yes,
             _ => Supported::Maybe
         }
+    }
+
+    fn get_editor(&mut self) -> Option<&mut Editor> {
+        Some(&mut self.editor)
+    }
+}
+
+struct SineSynthEditor {
+    is_open: bool,
+}
+
+impl Default for SineSynthEditor {
+    fn default() -> SineSynthEditor {
+        SineSynthEditor {
+            is_open: false,
+        }
+    }
+}
+
+impl Editor for SineSynthEditor {
+    fn size(&self) -> (i32, i32) {
+        (320, 240)
+    }
+
+    fn position(&self) -> (i32, i32) {
+        (100, 100)
+    }
+
+    fn open(&mut self, window: *mut c_void) {
+
+        self.is_open = true;
+    }
+
+    fn is_open(&mut self) -> bool {
+        self.is_open
     }
 }
 
