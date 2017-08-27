@@ -1,10 +1,10 @@
 [root]
-name = "sine_synth"
-version = "0.1.0"
+name = "cool_sine_synth"
+version = "0.0.1"
 dependencies = [
  "libc 0.2.24 (registry+https://github.com/rust-lang/crates.io-index)",
  "sdl2 0.30.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "vst2 0.0.1 (git+https://github.com/overdrivenpotato/rust-vst2)",
+ "vst2 0.0.1 (git+https://github.com/rust-dsp/rust-vst)",
 ]
 
 [[package]]
@@ -146,7 +146,7 @@ dependencies = [
 [[package]]
 name = "vst2"
 version = "0.0.1"
-source = "git+https://github.com/overdrivenpotato/rust-vst2#244e14bd28caff3b21aa27f26a57bf01f01b7780"
+source = "git+https://github.com/rust-dsp/rust-vst#b22b488f05f8a06c9edf966c578c574ac416d84c"
 dependencies = [
  "bitflags 0.8.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.24 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -184,6 +184,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum rand 0.3.16 (registry+https://github.com/rust-lang/crates.io-index)" = "eb250fd207a4729c976794d03db689c9be1d634ab5a1c9da9492a13d8fecbcdf"
 "checksum sdl2 0.30.0 (registry+https://github.com/rust-lang/crates.io-index)" = "63066036ad426250ac56d23e38fd05063b38b661556acd596f4046cc92d98415"
 "checksum sdl2-sys 0.30.0 (registry+https://github.com/rust-lang/crates.io-index)" = "b48638b7882759f3421038fcd38ad5f1ea19b119d80c99f1601933004629e34d"
-"checksum vst2 0.0.1 (git+https://github.com/overdrivenpotato/rust-vst2)" = "<none>"
+"checksum vst2 0.0.1 (git+https://github.com/rust-dsp/rust-vst)" = "<none>"
 "checksum winapi 0.2.8 (registry+https://github.com/rust-lang/crates.io-index)" = "167dc9d6949a9b857f3451275e911c3f44255842c1f7a76f33c55103a909087a"
 "checksum winapi-build 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "2d315eee3b34aca4797b2da6b13ed88266e6d612562a0c46390af8299fc699bc"

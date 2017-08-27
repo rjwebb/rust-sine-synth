@@ -5,7 +5,7 @@ use vst2::buffer::AudioBuffer;
 use vst2::plugin::{Category, Plugin, Info, CanDo};
 use vst2::editor::Editor;
 use vst2::event::Event;
-use vst2::api::Supported;
+use vst2::api::{Events,Supported};
 
 use std::f64::consts::PI;
 
@@ -22,8 +22,8 @@ fn midi_note_to_hz(note: u8) -> f64 {
 
 struct SineSynth {
     // Parameters
-    attack: f32,
-    release: f32,
+    attack: f64,
+    release: f64,
 
     sample_rate: f64,
     time: f64,
@@ -85,8 +85,8 @@ pub const TAU : f64 = PI * 2.0;
 impl Default for SineSynth {
     fn default() -> SineSynth {
         SineSynth {
-            attack: 0.2,
-            release: 0.2,
+            attack: 0.0001,
+            release: 0.0001,
 
             sample_rate: 44100.0,
             note_duration: 0.0,
@@ -117,16 +117,16 @@ impl Plugin for SineSynth {
 
     fn get_parameter(&self, index: i32) -> f32 {
         match index {
-            0 => self.attack,
-            1 => self.release,
+            0 => self.attack as f32,
+            1 => self.release as f32,
             _ => 0.0,
         }
     }
 
     fn set_parameter(&mut self, index: i32, value: f32) {
         match index {
-            0 => self.attack = value.max(1.0),
-            1 => self.release = value.max(1.0),
+            0 => self.attack = value.max(1.0) as f64,
+            1 => self.release = value.max(1.0) as f64,
             _ => (),
         }
     }
@@ -156,12 +156,13 @@ impl Plugin for SineSynth {
     }
 
     #[allow(unused_variables)]
-    fn process_events(&mut self, events: Vec<Event>) {
-        for event in events {
+    fn process_events(&mut self, events: &Events) {
+        for &e in events.events_raw() {
+            let event: Event = Event::from(unsafe { *e });
             match event {
-                Event::Midi { data, ..  } => self.process_midi_event(data),
+                Event::Midi(ev) => self.process_midi_event(ev.data),
                 // More events can be handled here.
-                _ => {}
+                _ => ()
             }
         }
     }
@@ -170,29 +171,25 @@ impl Plugin for SineSynth {
         self.sample_rate = rate as f64;
     }
 
-    fn process(&mut self, buffer: AudioBuffer<f32>) {
-        let (inputs, outputs) = buffer.split();
-
-        let samples = inputs
-            .first()
-            .map(|channel| channel.len())
-            .unwrap_or(0);
+    fn process(&mut self, buffer: &mut AudioBuffer<f32>) {
+        let samples = buffer.samples();
 
         let per_sample = self.time_per_sample();
 
-        for (input_buffer, output_buffer) in inputs.iter().zip(outputs) {
+        for (input_buffer, output_buffer) in buffer.zip() {
             let mut t = self.time;
+            let mut n = 0.0;
 
             for (_, output_sample) in input_buffer.iter().zip(output_buffer) {
                 if let Some(note) = self.note {
                     let signal = (t * midi_note_to_hz(note) * TAU).sin();
 
-                    let attack = 0.5;
-                    let release = 0.2;
+                    let attack = 0.01;
+                    let release = 0.01;
 
                     // Apply attack
-                    let alpha = if self.note_duration < attack {
-                        self.note_duration / attack
+                    let alpha = if (self.note_duration + n) < attack {
+                        (self.note_duration + n) / (self.attack * attack)
                     } else {
                         1.0
                     };
@@ -200,14 +197,16 @@ impl Plugin for SineSynth {
                     // Apply release
                     let beta = if self.is_pressed {
                         1.0
-                    } else if self.last_released < release {
-                        1.0 - (self.last_released / release)
+                    } else if (self.last_released + n) < release {
+                        1.0 - ((self.last_released + n) / (release))
                     } else {
                         0.0
                     };
 
-                    *output_sample = (signal * alpha * beta) as f32;
+                    let multiplier = alpha * beta;
+                    *output_sample = (signal * multiplier) as f32;
 
+                    n += per_sample;
                     t += per_sample;
                 } else {
                     *output_sample = 0.0;
@@ -253,7 +252,7 @@ impl Editor for SineSynthEditor {
         (100, 100)
     }
 
-    fn open(&mut self, window: *mut c_void) {
+    fn open(&mut self, _: *mut c_void) {
 
         self.is_open = true;
     }

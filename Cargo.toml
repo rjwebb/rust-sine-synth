@@ -1,10 +1,10 @@
 [package]
-name = "sine_synth"
-version = "0.1.0"
-authors = ["Rob Saunders <hello@robsaunders.io>"]
+name = "cool_sine_synth"
+version = "0.0.1"
+authors = ["Bob Webb <bob.wbb@gmail.com>"]
 
 [dependencies]
-vst2 = { git = "https://github.com/overdrivenpotato/rust-vst2" }
+vst2 = { git = "https://github.com/rust-dsp/rust-vst" }
 sdl2 = "0.30.0"
 libc = "*"
 
