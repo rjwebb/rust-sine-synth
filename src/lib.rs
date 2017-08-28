@@ -20,6 +20,13 @@ fn midi_note_to_hz(note: u8) -> f64 {
     (A4 / 32.0) * ((note as f64 - 9.0) / 12.0).exp2()
 }
 
+struct NotePress {
+    note: u8,
+    pressed_time: f64,  // time at which the note was pressed
+    released_time: f64,  // time at which the note was released
+    is_pressed: bool,  // true, if note is currently pressed
+}
+
 struct SineSynth {
     // Parameters
     attack: f64,
@@ -27,10 +34,8 @@ struct SineSynth {
 
     sample_rate: f64,
     time: f64,
-    note_duration: f64,
-    note: Option<u8>,
-    is_pressed: bool,  // true if current pressed
-    last_released: f64,  // time since the note was last released
+
+    notes: Vec<NotePress>,  // all currently pressed/just pressed notes
 
     editor: SineSynthEditor,
 }
@@ -59,24 +64,30 @@ impl SineSynth {
     }
 
     fn note_on(&mut self, note: u8) {
-        if self.note == None || !self.is_pressed{
-            // if no note is already pressed
-            // basically enforcing monophonic control
-            self.note_duration = 0.0;
-            self.note = Some(note);
-            self.is_pressed = true;
-        }
+        // sanity check, make sure note isn't already in list?
+        self.notes.retain(|ref x| x.note != note);
+
+        // make a new note
+        let new_note_press = NotePress {
+            note: note,
+            pressed_time: self.time, // current time
+            released_time: 0.0, // null
+            is_pressed: true,
+        };
+
+        self.notes.push(new_note_press);
     }
 
     fn note_off(&mut self, note: u8) {
-        if let Some(current_note) = self.note {
-            if current_note == note {
-                // only consider note-off events
-                // for the current note
-                self.last_released = 0.0;
-                self.is_pressed = false;
-            }
-        }
+
+        match self.notes.iter().position(|ref x| x.note == note) {
+            Some(i) => {
+                let note_press = self.notes.get_mut(i).unwrap();
+                note_press.is_pressed = false;
+                note_press.released_time = self.time;
+            },
+            None => (),
+        };
     }
 }
 
@@ -89,11 +100,8 @@ impl Default for SineSynth {
             release: 0.0001,
 
             sample_rate: 44100.0,
-            note_duration: 0.0,
             time: 0.0,
-            note: None,
-            is_pressed: false,
-            last_released: 0.0,
+            notes: Vec::new(),
 
             editor: Default::default()
         }
@@ -103,8 +111,8 @@ impl Default for SineSynth {
 impl Plugin for SineSynth {
     fn get_info(&self) -> Info {
         Info {
-            name: "SineSynth".to_string(),
-            vendor: "DeathDisco".to_string(),
+            name: "PolySineSynth".to_string(),
+            vendor: "test vendor".to_string(),
             unique_id: 6667,
             category: Category::Synth,
             inputs: 2,
@@ -178,45 +186,45 @@ impl Plugin for SineSynth {
 
         for (input_buffer, output_buffer) in buffer.zip() {
             let mut t = self.time;
-            let mut n = 0.0;
 
             for (_, output_sample) in input_buffer.iter().zip(output_buffer) {
-                if let Some(note) = self.note {
-                    let signal = (t * midi_note_to_hz(note) * TAU).sin();
+                let num_notes = self.notes.len();
+
+                for note_press in self.notes.iter() {
+                    let signal = (t * midi_note_to_hz(note_press.note) * TAU).sin();
 
                     let attack = 0.01;
                     let release = 0.01;
 
                     // Apply attack
-                    let alpha = if (self.note_duration + n) < attack {
-                        (self.note_duration + n) / (self.attack * attack)
+                    let time_since_press = t - note_press.pressed_time;
+                    let alpha = if time_since_press < attack {
+                        time_since_press / self.attack
                     } else {
                         1.0
                     };
 
                     // Apply release
-                    let beta = if self.is_pressed {
+                    let beta = if note_press.is_pressed {
                         1.0
-                    } else if (self.last_released + n) < release {
-                        1.0 - ((self.last_released + n) / (release))
                     } else {
-                        0.0
+                        let time_since_release = t - note_press.released_time;
+                        if time_since_release < release {
+                            1.0 - (time_since_release / release)
+                        } else {
+                            0.0
+                        }
                     };
 
-                    let multiplier = alpha * beta;
-                    *output_sample = (signal * multiplier) as f32;
-
-                    n += per_sample;
-                    t += per_sample;
-                } else {
-                    *output_sample = 0.0;
+                    let multiplier = alpha * beta / (num_notes as f64);
+                    *output_sample += (signal * multiplier) as f32;
                 }
+
+                t += per_sample;
             }
         }
 
         self.time += samples as f64 * per_sample;
-        self.note_duration += samples as f64 * per_sample;
-        self.last_released += samples as f64 * per_sample;
     }
 
     fn can_do(&self, can_do: CanDo) -> Supported {
